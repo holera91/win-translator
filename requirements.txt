@@ -3,3 +3,5 @@ pyperclip
 deep-translator
 pyinstaller
 pywin32
+pystray
+pillow

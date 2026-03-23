@@ -9,3 +9,10 @@ ENV/
 build/
 dist/
 *.spec
+
+# Gemini CLI
+GEMINI.md
+.gemini
+
+# Config
+translator.json
