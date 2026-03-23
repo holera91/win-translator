@@ -3,6 +3,7 @@ import pyperclip
 import time
 from deep_translator import GoogleTranslator
 import sys
+import os
 import win32clipboard
 import win32con
 import win32api
@@ -136,7 +137,7 @@ class HotkeyWindow:
                 vk = get_vk_code(key)
                 win32gui.RegisterHotKey(self.hwnd, idx, modmask, vk)
             except Exception as e:
-                print(f'❌ Помилка реєстрації {lang}: {e}')
+                pass
         # Вихід Ctrl+Alt+Q для безпеки
         try:
             win32gui.RegisterHotKey(self.hwnd, 99, win32con.MOD_CONTROL | win32con.MOD_ALT, ord('Q'))
@@ -168,8 +169,6 @@ class HotkeyWindow:
 
     def run(self):
         self.register_hotkeys()
-        # print('Гарячі клавіші зареєстровано (win32gui)\n')
-        # sys.stdout.flush()
         win32gui.PumpMessages()
 
 
@@ -177,14 +176,15 @@ def get_clipboard_text():
     try:
         win32clipboard.OpenClipboard()
         try:
-            if win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
-                return win32clipboard.GetClipboardData(win32con.CF_TEXT).decode('utf-8', errors='ignore')
-            elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+            # Спершу перевіряємо Unicode - він найнадійніший для кирилиці
+            if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
                 return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+            elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
+                return win32clipboard.GetClipboardData(win32con.CF_TEXT).decode('utf-8', errors='ignore')
         finally:
             win32clipboard.CloseClipboard()
-    except Exception as e:
-        print(f'  ❌ Помилка отримання буфера: {e}')
+    except Exception:
+        pass
     return ''
 
 
@@ -192,15 +192,15 @@ def translate_and_replace(target_lang):
     try:
         from pynput.keyboard import Controller, Key
         controller = Controller()
-        old_clipboard = pyperclip.paste()
-
+        
+        # Очищаємо затиснуті клавіші модифікатори перед емуляцією Ctrl+C
         time.sleep(0.1)
         controller.release(Key.ctrl)
         controller.release(Key.shift)
         controller.release(Key.alt)
         time.sleep(0.1)
 
-        # print('  → Копіюю текст...')
+        # Копіюємо текст
         controller.press(Key.ctrl)
         controller.press('c')
         controller.release('c')
@@ -208,56 +208,51 @@ def translate_and_replace(target_lang):
         time.sleep(0.4)
 
         text_to_translate = get_clipboard_text()
-        if not text_to_translate.strip():
-            # print('  ⚠️ Текст не був виділений!')
-            # sys.stdout.flush()
+        if not text_to_translate or not text_to_translate.strip():
             return
 
-        # print('  → Перекладаю...')
+        # Перекладаємо
         translated = GoogleTranslator(source='auto', target=target_lang).translate(text_to_translate)
-        pyperclip.copy(translated)
+        
+        if not translated:
+            return
 
+        # Копіюємо результат назад
+        pyperclip.copy(translated)
         time.sleep(0.2)
-        # print('  → Вставляю...')
+
+        # Вставляємо результат
         controller.press(Key.ctrl)
         controller.press('v')
         controller.release('v')
         controller.release(Key.ctrl)
-        time.sleep(0.2)
-        # print('  ✅ Готово!')
-        # sys.stdout.flush()
+        time.sleep(0.1)
 
-    except Exception as e:
-        print(f'  ❌ Помилка: {e}')
+    except Exception:
+        pass
 
 
 def on_de():
-    # print('Ctrl+Shift+G натиснута - переклад на німецьку...')
     translate_and_replace('de')
 
 
 def on_en():
-    # print('Ctrl+Shift+E натиснута - переклад на англійську...')
     translate_and_replace('en')
 
 
 def on_fr():
-    # print('Ctrl+Shift+F натиснута - переклад на французьку...')
     translate_and_replace('fr')
 
 
 def on_es():
-    # print('Ctrl+Shift+S натиснута - переклад на іспанську...')
     translate_and_replace('es')
 
 
 def on_it():
-    # print('Ctrl+Shift+I натиснута - переклад на італійську...')
     translate_and_replace('it')
 
 
 def open_settings_window():
-    # Функція для запуску tkinter вікна з привильною обробкою івентів
     try:
         root = tk.Tk()
         root.title('Налаштування гарячих клавіш')
@@ -265,7 +260,6 @@ def open_settings_window():
         root.resizable(False, False)
         root.attributes("-topmost", True)
 
-        # Переводимо вікно на передній план і даємо йому фокус
         root.deiconify()
         root.lift()
         root.focus_force()
@@ -329,8 +323,8 @@ def open_settings_window():
         root.protocol("WM_DELETE_WINDOW", on_close)
         root.mainloop()
         
-    except Exception as e:
-        print(f'❌ Помилка при відкритті налаштувань: {e}')
+    except Exception:
+        pass
 
 
 def create_image():
@@ -344,19 +338,23 @@ def create_image():
 
 
 def exit_program():
-    global tray_icon, mutex_handle
-    if tray_icon:
-        tray_icon.stop()
-    if hotkey_window and hotkey_window.hwnd:
-        unregister_hotkeys(hotkey_window.hwnd)
-    if mutex_handle:
-        try:
-            win32event.ReleaseMutex(mutex_handle)
-            win32api.CloseHandle(mutex_handle)
-        except Exception:
-            pass
-    win32gui.PostQuitMessage(0)
-    sys.exit(0)
+    global tray_icon, mutex_handle, hotkey_window
+    try:
+        if tray_icon:
+            tray_icon.stop()
+        if hotkey_window and hotkey_window.hwnd:
+            unregister_hotkeys(hotkey_window.hwnd)
+            win32gui.DestroyWindow(hotkey_window.hwnd)
+        if mutex_handle:
+            try:
+                win32event.ReleaseMutex(mutex_handle)
+                win32api.CloseHandle(mutex_handle)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        os._exit(0)
 
 
 def setup_tray():
@@ -379,13 +377,10 @@ def main():
     global mutex_handle
     mutex_handle = win32event.CreateMutex(None, False, SINGLE_INSTANCE_MUTEX_NAME)
     if win32api.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        # print('Інший екземпляр програми вже запущено. Спочатку закрийте його.')
         return
 
     load_config()
     setup_tray()
-    # print('Скрипт перекладу запущено.')
-    # print('Скрипт чекає на гарячі клавіши...')
     global hotkey_window
     hotkey_window = HotkeyWindow()
     hotkey_window.create_window()
