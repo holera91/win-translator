@@ -1,5 +1,5 @@
-keyboard
+pynput
 pyperclip
 deep-translator
-pyautogui
 pyinstaller
+pywin32
